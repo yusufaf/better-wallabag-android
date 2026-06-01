@@ -1,0 +1,6 @@
+- Support newer Android versions
+- Sort articles by creation date instead of article ID, to avoid import issues
+- Fix annotate button disappearing
+- Fix TTS widget display
+- Update translations: Arabic, Belarusian, Catalan, Chinese (Traditional), Dutch, French, Galician, German, Italian, Japanese, Kabyle, Korean, Norwegian Bokmål, Polish, Portuguese, Tamil, Ukrainian
+- Update dependencies

@@ -1,0 +1,6 @@
+- Prise en charge des versions Android plus récentes
+- Tri des articles par date de création plutôt que par identifiant, afin d'éviter les problèmes d'importation
+- Correction du problème de disparition du bouton d'annotation
+- Correction de l'affichage du widget de synthèse vocale
+- Mise à jour des traductions : arabe, biélorusse, catalan, chinois traditionnel, néerlandais, français, galicien, allemand, italien, japonais, kabyle, coréen, norvégien bokmål, polonais, portugais, tamoul, ukrainien
+- Mise à jour des dépendances
