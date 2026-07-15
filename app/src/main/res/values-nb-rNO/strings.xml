@@ -25,7 +25,7 @@
     <string name="menu_syncLocalChanges">Synkroniser lokale endringer</string>
     <string name="d_deleteArticle_title">Slett artikkel?</string>
     <string name="d_deleteArticle_message">Er du sikker på at du ønsker å slette artikkelen?</string>
-    <string name="txtNetOffline">Sjekk tilkobling til internett!</string>
+    <string name="txtNetOffline">Sjekk internettforbindelsen din først.</string>
     <string name="txtConfigNotSet">Sett opp programmet før du synkroniserer.</string>
     <string name="dialog_add_label">Legg til ny artikkel</string>
     <string name="page_url">Sidens nettadresse</string>
