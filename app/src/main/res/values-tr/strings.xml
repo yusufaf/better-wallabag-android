@@ -340,7 +340,7 @@
     <string name="notification_channel_name_background_operations">Arka plan işlemleri</string>
     <string name="pref_desc_misc_ftsIcuTokenizer_enabled">Tam metin araması içerik indekslemesinde ICU ayrıştırıcı kullanır (başka durumlarda genel unicode61 ayrıştırıcı kullanılır). Bu değişiklik Çince, Japonca, Korece gibi dillerde aramayı iyileştirmeye yardımcı olabilir. Bu işlemin yayına alınması için \"Tam güncelleme\" gerekmektedir.</string>
     <string name="pref_name_misc_ftsIcuTokenizer_enabled">Tam metin aramasında ICU ayrıştırıcı kullan</string>
-    <string name="pref_desc_ui_mathRendering_delimiters">KaTeX\'İN işleyeceği ortam ayraçlarını seçin</string>
+    <string name="pref_desc_ui_mathRendering_delimiters">KaTeX\'in işleyeceği ortam ayraçlarını seçin</string>
     <string name="pref_name_ui_mathRendering_delimiters">Matematik ayraçları</string>
     <string name="pref_desc_ui_mathRendering_enabled">KaTeX kullanarak LaTeX-math formül işleme</string>
     <string name="pref_name_ui_mathRendering_enabled">Matematik işleme</string>
