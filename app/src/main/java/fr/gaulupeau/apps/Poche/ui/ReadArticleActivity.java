@@ -174,6 +174,7 @@ public class ReadArticleActivity extends AppCompatActivity {
     private String articleDomain;
     private String articleUrl;
     private Double articleProgress;
+    private Annotation pendingReadingPositionAnnotation;
 
     private Long previousArticleID;
     private Long nextArticleID;
@@ -1233,7 +1234,7 @@ public class ReadArticleActivity extends AppCompatActivity {
 
         // should there be a pause between visibility change and position restoration?
 
-        restoreReadingPosition();
+        restoreReadingPosition(true);
 
         ttsOnDocumentLoadingFinished();
     }
@@ -1438,13 +1439,22 @@ public class ReadArticleActivity extends AppCompatActivity {
         return position;
     }
 
-    private void restoreReadingPosition() {
-        Log.d(TAG, "restoreReadingPosition() articleProgress: " + articleProgress);
+    /**
+     * @param useBookmarkAnchor whether the bookmark anchor (if any) takes priority over
+     *                          articleProgress. True only for the initial-load restore --
+     *                          restorePositionAfterUpdate() (font size, etc.) always wants the
+     *                          just-captured articleProgress, not last session's old bookmark.
+     */
+    private void restoreReadingPosition(boolean useBookmarkAnchor) {
+        Log.d(TAG, "restoreReadingPosition() articleProgress: " + articleProgress
+                + ", useBookmarkAnchor: " + useBookmarkAnchor);
 
-        Annotation readingPositionAnnotation = findReadingPositionAnnotation();
-        if (readingPositionAnnotation != null && !readingPositionAnnotation.getRanges().isEmpty()
-                && restoreReadingPositionFromAnchor(readingPositionAnnotation.getRanges().get(0))) {
-            return;
+        if (useBookmarkAnchor) {
+            Annotation readingPositionAnnotation = findReadingPositionAnnotation();
+            if (readingPositionAnnotation != null && !readingPositionAnnotation.getRanges().isEmpty()
+                    && restoreReadingPositionFromAnchor(readingPositionAnnotation.getRanges().get(0))) {
+                return;
+            }
         }
 
         restoreReadingPositionFromProgress();
@@ -1497,6 +1507,13 @@ public class ReadArticleActivity extends AppCompatActivity {
     }
 
     private Annotation findReadingPositionAnnotation() {
+        // addAnnotation()/deleteAnnotation() are fire-and-forget: they bind to a background
+        // service and only mutate article.getAnnotations() once that async call actually runs.
+        // A quick close-reopen-close can otherwise fire a second capture before the first has
+        // landed, so this cached reference -- set synchronously in
+        // upsertReadingPositionAnnotation() -- takes priority over the (possibly stale) list.
+        if (pendingReadingPositionAnnotation != null) return pendingReadingPositionAnnotation;
+
         if (article == null) return null;
 
         for (Annotation annotation : article.getAnnotations()) {
@@ -1569,6 +1586,10 @@ public class ReadArticleActivity extends AppCompatActivity {
         annotation.setText(READING_POSITION_ANNOTATION_TEXT);
         annotation.setQuote(quote);
         annotation.setRanges(Collections.singletonList(range));
+
+        // Cache synchronously, before the async add below has any chance to land -- closes the
+        // race window described above.
+        pendingReadingPositionAnnotation = annotation;
 
         OperationsHelper.addAnnotation(appContext, articleId, annotation);
     }
@@ -1806,7 +1827,7 @@ public class ReadArticleActivity extends AppCompatActivity {
                     webViewContent.postDelayed(this, 10);
                 } else {
                     Log.d(TAG, "restorePositionAfterUpdate() restoring position");
-                    restoreReadingPosition();
+                    restoreReadingPosition(false);
                 }
             }
         }, 10);
