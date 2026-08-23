@@ -12,6 +12,10 @@
     <string name="menuOpenOriginal">Open original</string>
     <string name="menuCopyOriginalURL">Copy original URL</string>
     <string name="menuTTS">Text To Speech</string>
+    <string name="menu_findInArticle">Find in article</string>
+    <string name="find_in_article_hint">Find in article</string>
+    <string name="find_in_article_counter">%1$d/%2$d</string>
+    <string name="find_in_article_no_matches">0/0</string>
     <string name="ttsSpeed">Rate</string>
     <string name="ttsPitch">Pitch</string>
     <string name="ttsVolume">Volume</string>
