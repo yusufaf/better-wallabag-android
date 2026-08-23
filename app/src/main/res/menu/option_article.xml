@@ -31,6 +31,11 @@
         android:icon="@android:drawable/ic_menu_share"
         app:showAsAction="ifRoom"/>
     <item
+        android:id="@+id/menuFindInArticle"
+        android:title="@string/menu_findInArticle"
+        android:icon="@android:drawable/ic_menu_search"
+        app:showAsAction="ifRoom"/>
+    <item
         android:id="@+id/menuChangeTitle"
         android:title="@string/menu_changeTitle"/>
     <item

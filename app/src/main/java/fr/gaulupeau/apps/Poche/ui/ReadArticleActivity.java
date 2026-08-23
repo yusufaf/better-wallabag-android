@@ -3,7 +3,11 @@ package fr.gaulupeau.apps.Poche.ui;
 import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.Editable;
 import android.text.TextUtils;
+import android.text.TextWatcher;
 import android.util.Log;
 import android.view.ActionMode;
 import android.view.GestureDetector;
@@ -17,6 +21,7 @@ import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
 import android.webkit.ConsoleMessage;
 import android.webkit.HttpAuthHandler;
 import android.webkit.WebChromeClient;
@@ -24,6 +29,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
@@ -35,6 +41,8 @@ import androidx.appcompat.app.AlertDialog;
 import org.greenrobot.eventbus.Subscribe;
 import org.greenrobot.eventbus.ThreadMode;
 import org.greenrobot.greendao.query.QueryBuilder;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.net.URL;
 import java.util.ArrayList;
@@ -143,6 +151,14 @@ public class ReadArticleActivity extends AppCompatActivity {
     private LinearLayout bottomTools;
     private View hrBar;
     private TtsFragment ttsFragment;
+
+    private LinearLayout findBar;
+    private EditText findBarInput;
+    private TextView findBarCounter;
+    private final Handler findBarHandler = new Handler(Looper.getMainLooper());
+    private Runnable findBarSearchRunnable;
+    private static final long FIND_DEBOUNCE_MS = 200;
+    private int findBarMatchCount;
 
     private Article article;
     private String articleTitle;
@@ -254,6 +270,8 @@ public class ReadArticleActivity extends AppCompatActivity {
 
         initButtons();
 
+        initFindBar();
+
         initWebView();
 
         loadArticleToWebView();
@@ -299,6 +317,8 @@ public class ReadArticleActivity extends AppCompatActivity {
 
     @Override
     public void onStop() {
+        hideFindBar();
+
         if (loadingFinished && article != null) {
             cancelPositionRestoration();
 
@@ -353,6 +373,10 @@ public class ReadArticleActivity extends AppCompatActivity {
 
             case R.id.menuTTS:
                 toggleTTS(true);
+                return true;
+
+            case R.id.menuFindInArticle:
+                showFindBar();
                 return true;
         }
 
@@ -639,6 +663,121 @@ public class ReadArticleActivity extends AppCompatActivity {
 
         findViewById(R.id.btnGoPrevious).setVisibility(previousArticleID == null ? View.GONE : View.VISIBLE);
         findViewById(R.id.btnGoNext).setVisibility(nextArticleID == null ? View.GONE : View.VISIBLE);
+    }
+
+    private void initFindBar() {
+        findBar = findViewById(R.id.findBar);
+        findBarInput = findViewById(R.id.findBarInput);
+        findBarCounter = findViewById(R.id.findBarCounter);
+        ImageButton findBarPrevious = findViewById(R.id.findBarPrevious);
+        ImageButton findBarNext = findViewById(R.id.findBarNext);
+        ImageButton findBarClose = findViewById(R.id.findBarClose);
+
+        findBarInput.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                scheduleFind(s.toString());
+            }
+        });
+
+        findBarPrevious.setOnClickListener(v -> findGoTo(-1));
+        findBarNext.setOnClickListener(v -> findGoTo(1));
+        findBarClose.setOnClickListener(v -> hideFindBar());
+    }
+
+    private void showFindBar() {
+        if (findBar.getVisibility() == View.VISIBLE) {
+            findBarInput.requestFocus();
+            return;
+        }
+
+        findBar.setVisibility(View.VISIBLE);
+        findBarInput.requestFocus();
+
+        InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+        if (imm != null) imm.showSoftInput(findBarInput, InputMethodManager.SHOW_IMPLICIT);
+    }
+
+    private void hideFindBar() {
+        if (findBar == null || findBar.getVisibility() != View.VISIBLE) return;
+
+        findBarHandler.removeCallbacksAndMessages(null);
+
+        InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+        if (imm != null) imm.hideSoftInputFromWindow(findBarInput.getWindowToken(), 0);
+
+        findBarInput.setText("");
+        findBar.setVisibility(View.GONE);
+
+        webViewContent.evaluateJavascript("wbFindClear();", null);
+    }
+
+    private void scheduleFind(String query) {
+        if (findBarSearchRunnable != null) findBarHandler.removeCallbacks(findBarSearchRunnable);
+
+        findBarSearchRunnable = () -> performFind(query);
+        findBarHandler.postDelayed(findBarSearchRunnable, FIND_DEBOUNCE_MS);
+    }
+
+    private void performFind(String query) {
+        if (webViewContent == null) return;
+
+        String script = "wbFind(" + JSONObject.quote(query) + ");";
+        webViewContent.evaluateJavascript(script, result -> handleFindResult(result, true));
+    }
+
+    private void findGoTo(int delta) {
+        if (webViewContent == null) return;
+
+        String script = "wbFindGoTo(wbFindCurrentIndex + (" + delta + "));";
+        webViewContent.evaluateJavascript(script, result -> handleFindResult(result, false));
+    }
+
+    private void handleFindResult(String rawJson, boolean isNewSearch) {
+        if (rawJson == null || "null".equals(rawJson)) return;
+
+        try {
+            // evaluateJavascript wraps string results in an extra layer of JSON quoting
+            JSONObject json = new JSONObject(new JSONObject("{\"v\":" + rawJson + "}").getString("v"));
+
+            double y;
+            if (isNewSearch) {
+                findBarMatchCount = json.getInt("count");
+                updateFindCounter(findBarMatchCount > 0 ? 1 : 0);
+                y = json.getDouble("currentY");
+            } else {
+                int index = json.getInt("index");
+                updateFindCounter(index + 1);
+                y = json.getDouble("y");
+            }
+
+            if (y >= 0) scrollWebViewYToPosition(y);
+        } catch (JSONException e) {
+            Log.w(TAG, "handleFindResult() failed to parse JS result: " + rawJson, e);
+        }
+    }
+
+    private void updateFindCounter(int current) {
+        if (findBarMatchCount == 0) {
+            findBarCounter.setText(getString(R.string.find_in_article_no_matches));
+        } else {
+            findBarCounter.setText(getString(R.string.find_in_article_counter, current, findBarMatchCount));
+        }
+    }
+
+    private void scrollWebViewYToPosition(double cssY) {
+        if (scrollView == null || webViewContent == null) return;
+
+        float density = getResources().getDisplayMetrics().density;
+        int y = webViewContent.getTop() + (int) (cssY * density);
+
+        scrollView.smoothScrollTo(scrollView.getScrollX(), y);
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -928,7 +1067,8 @@ public class ReadArticleActivity extends AppCompatActivity {
     }
 
     private String getExtraHead() {
-        String extra = "";
+        String extra = "\n" +
+                "\t\t<script src=\"find-in-article.js\"></script>";
 
         if (annotationsEnabled) {
             extra += "\n" +

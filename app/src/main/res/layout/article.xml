@@ -108,6 +108,70 @@
 
     </androidx.core.widget.NestedScrollView>
 
+    <LinearLayout
+        android:id="@+id/findBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:layout_marginTop="?attr/actionBarSize"
+        android:background="?attr/colorPrimary"
+        android:elevation="8dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingEnd="4dp"
+        android:visibility="gone">
+
+        <EditText
+            android:id="@+id/findBarInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="@string/find_in_article_hint"
+            android:inputType="text"
+            android:imeOptions="actionSearch"
+            android:importantForAutofill="no"
+            android:maxLines="1"
+            android:background="@null"
+            android:textColor="@android:color/white"
+            android:textColorHint="#B3FFFFFF" />
+
+        <TextView
+            android:id="@+id/findBarCounter"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="4dp"
+            android:textColor="@android:color/white" />
+
+        <ImageButton
+            android:id="@+id/findBarPrevious"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/menuPrevious"
+            android:src="@drawable/ic_action_previous_item"
+            app:tint="@android:color/white" />
+
+        <ImageButton
+            android:id="@+id/findBarNext"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/menuNext"
+            android:src="@drawable/ic_action_next_item"
+            app:tint="@android:color/white" />
+
+        <ImageButton
+            android:id="@+id/findBarClose"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@android:string/cancel"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            app:tint="@android:color/white" />
+
+    </LinearLayout>
+
     <FrameLayout
         android:id="@+id/tts_container"
         android:layout_width="match_parent"
