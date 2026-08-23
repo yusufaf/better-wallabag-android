@@ -1,6 +1,7 @@
 package fr.gaulupeau.apps.Poche.ui;
 
 import android.annotation.SuppressLint;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
@@ -46,6 +47,7 @@ import org.json.JSONObject;
 
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.EnumSet;
 import java.util.List;
@@ -60,6 +62,7 @@ import fr.gaulupeau.apps.Poche.data.Settings;
 import fr.gaulupeau.apps.Poche.data.StorageHelper;
 import fr.gaulupeau.apps.Poche.data.dao.ArticleDao;
 import fr.gaulupeau.apps.Poche.data.dao.entities.Annotation;
+import fr.gaulupeau.apps.Poche.data.dao.entities.AnnotationRange;
 import fr.gaulupeau.apps.Poche.data.dao.entities.Article;
 import fr.gaulupeau.apps.Poche.data.dao.entities.Tag;
 import fr.gaulupeau.apps.Poche.events.ArticlesChangedEvent;
@@ -91,6 +94,12 @@ public class ReadArticleActivity extends AppCompatActivity {
     private static final String TAG = ReadArticleActivity.class.getSimpleName();
 
     private static final String TAG_TTS_FRAGMENT = "ttsFragment";
+
+    // Marks the one reserved annotation per article used to carry the "resume reading
+    // here" bookmark. Kept out of the in-app annotation list (see
+    // JsAnnotationController.Callback#getAnnotations()) but synced like any other
+    // annotation, so it shows up as a highlight in wallabag's web reader too.
+    private static final String READING_POSITION_ANNOTATION_TEXT = "Left off here — wallabag-android";
 
     private static final EnumSet<ArticlesChangedEvent.ChangeType> CHANGE_SET_ACTIONS = EnumSet.of(
             ArticlesChangedEvent.ChangeType.FAVORITED,
@@ -323,6 +332,8 @@ public class ReadArticleActivity extends AppCompatActivity {
             cancelPositionRestoration();
 
             OperationsHelper.setArticleProgress(this, article.getArticleId(), getReadingPosition());
+
+            captureReadingPositionAnchor();
         }
 
         super.onStop();
@@ -780,6 +791,15 @@ public class ReadArticleActivity extends AppCompatActivity {
         scrollView.smoothScrollTo(scrollView.getScrollX(), y);
     }
 
+    /** Inverse of {@link #scrollWebViewYToPosition(double)}: the current scroll position,
+     * in the WebView content's own CSS pixel space. */
+    private double getWebViewCssScrollTop() {
+        if (scrollView == null || webViewContent == null) return 0;
+
+        float density = getResources().getDisplayMetrics().density;
+        return (scrollView.getScrollY() - webViewContent.getTop()) / density;
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     private void initWebView() {
         WebSettings webViewSettings = webViewContent.getSettings();
@@ -958,7 +978,13 @@ public class ReadArticleActivity extends AppCompatActivity {
                 new JsAnnotationController.Callback() {
                     @Override
                     public List<Annotation> getAnnotations() {
-                        return article.getAnnotations();
+                        List<Annotation> annotations = new ArrayList<>();
+                        for (Annotation annotation : article.getAnnotations()) {
+                            if (!READING_POSITION_ANNOTATION_TEXT.equals(annotation.getText())) {
+                                annotations.add(annotation);
+                            }
+                        }
+                        return annotations;
                     }
 
                     @Override
@@ -1068,7 +1094,9 @@ public class ReadArticleActivity extends AppCompatActivity {
 
     private String getExtraHead() {
         String extra = "\n" +
-                "\t\t<script src=\"find-in-article.js\"></script>";
+                "\t\t<script src=\"find-in-article.js\"></script>" +
+                "\n" +
+                "\t\t<script src=\"reading-position.js\"></script>";
 
         if (annotationsEnabled) {
             extra += "\n" +
@@ -1413,20 +1441,153 @@ public class ReadArticleActivity extends AppCompatActivity {
     private void restoreReadingPosition() {
         Log.d(TAG, "restoreReadingPosition() articleProgress: " + articleProgress);
 
+        Annotation readingPositionAnnotation = findReadingPositionAnnotation();
+        if (readingPositionAnnotation != null && !readingPositionAnnotation.getRanges().isEmpty()
+                && restoreReadingPositionFromAnchor(readingPositionAnnotation.getRanges().get(0))) {
+            return;
+        }
+
+        restoreReadingPositionFromProgress();
+    }
+
+    /**
+     * Tries to scroll to the bookmarked anchor. Returns true if a resolution attempt was
+     * kicked off (async, via evaluateJavascript) -- the percentage-based fallback still runs
+     * if that attempt comes back empty (e.g. the anchor no longer matches the article HTML).
+     */
+    private boolean restoreReadingPositionFromAnchor(AnnotationRange range) {
+        if (webViewContent == null) return false;
+
+        JSONObject rangeJson = new JSONObject();
+        try {
+            rangeJson.put("start", range.getStart());
+            rangeJson.put("end", range.getEnd());
+            rangeJson.put("startOffset", range.getStartOffset());
+            rangeJson.put("endOffset", range.getEndOffset());
+        } catch (JSONException e) {
+            Log.w(TAG, "restoreReadingPositionFromAnchor() failed to build range JSON", e);
+            return false;
+        }
+
+        String script = "wbScrollToAnchor(" + rangeJson + ");";
+        webViewContent.evaluateJavascript(script, result -> {
+            Double y = unwrapJsDouble(result, "y");
+            if (y != null && y >= 0) {
+                scrollWebViewYToPosition(y);
+            } else {
+                restoreReadingPositionFromProgress();
+            }
+        });
+        return true;
+    }
+
+    private void restoreReadingPositionFromProgress() {
+        Log.v(TAG, "restoreReadingPositionFromProgress() articleProgress: " + articleProgress);
+
         if (articleProgress != null) {
             int viewHeight = scrollView.getHeight();
             int totalHeight = scrollView.getChildAt(0).getHeight();
-
-            Log.v(TAG, "restoreReadingPosition() viewHeight: " + viewHeight
-                    + ", totalHeight: " + totalHeight);
 
             totalHeight -= viewHeight;
 
             int yOffset = totalHeight > 0 ? ((int) Math.round(articleProgress * totalHeight)) : 0;
 
-            Log.v(TAG, "restoreReadingPosition() yOffset: " + yOffset);
-
             scrollView.scrollTo(scrollView.getScrollX(), yOffset);
+        }
+    }
+
+    private Annotation findReadingPositionAnnotation() {
+        if (article == null) return null;
+
+        for (Annotation annotation : article.getAnnotations()) {
+            if (READING_POSITION_ANNOTATION_TEXT.equals(annotation.getText())) return annotation;
+        }
+        return null;
+    }
+
+    private void captureReadingPositionAnchor() {
+        if (webViewContent == null) return;
+
+        int articleId = article.getArticleId();
+        double viewportTop = getWebViewCssScrollTop();
+
+        webViewContent.evaluateJavascript("wbGetTopVisibleAnchor(" + viewportTop + ");", result -> {
+            if (result == null || "null".equals(result)) return;
+
+            try {
+                JSONObject anchor = unwrapJsObject(result);
+                if (anchor == null) return;
+
+                upsertReadingPositionAnnotation(articleId, anchor);
+            } catch (JSONException e) {
+                Log.w(TAG, "captureReadingPositionAnchor() failed to parse JS result: " + result, e);
+            }
+        });
+    }
+
+    private void upsertReadingPositionAnnotation(int articleId, JSONObject anchor) throws JSONException {
+        String start = anchor.getString("start");
+        String end = anchor.getString("end");
+        long startOffset = anchor.getLong("startOffset");
+        long endOffset = anchor.getLong("endOffset");
+        String quote = anchor.optString("quote", "");
+
+        Annotation existing = findReadingPositionAnnotation();
+        if (existing != null) {
+            List<AnnotationRange> existingRanges = existing.getRanges();
+            AnnotationRange existingRange = existingRanges.isEmpty() ? null : existingRanges.get(0);
+            if (existingRange != null
+                    && start.equals(existingRange.getStart())
+                    && end.equals(existingRange.getEnd())
+                    && startOffset == existingRange.getStartOffset()
+                    && endOffset == existingRange.getEndOffset()) {
+                Log.d(TAG, "upsertReadingPositionAnnotation() anchor unchanged, skipping");
+                return;
+            }
+        }
+
+        // This runs off the tail of an async evaluateJavascript() callback, which can land
+        // after onStop() has returned and the activity has started finishing (e.g. back
+        // button). addAnnotation()/deleteAnnotation() bind to a service using the given
+        // Context, and that bind's onServiceConnected() never fires for a Context that's
+        // already tearing down -- so use the application context here, not the activity.
+        Context appContext = getApplicationContext();
+
+        // The server API can only update an annotation's text, not its ranges, so moving
+        // the bookmark means replacing it: delete the old one (if any), add a new one.
+        if (existing != null) {
+            OperationsHelper.deleteAnnotation(appContext, articleId, existing);
+        }
+
+        AnnotationRange range = new AnnotationRange();
+        range.setStart(start);
+        range.setEnd(end);
+        range.setStartOffset(startOffset);
+        range.setEndOffset(endOffset);
+
+        Annotation annotation = new Annotation();
+        annotation.setText(READING_POSITION_ANNOTATION_TEXT);
+        annotation.setQuote(quote);
+        annotation.setRanges(Collections.singletonList(range));
+
+        OperationsHelper.addAnnotation(appContext, articleId, annotation);
+    }
+
+    /** Unwraps evaluateJavascript()'s double-JSON-encoded string result into a JSONObject. */
+    private static JSONObject unwrapJsObject(String rawJson) throws JSONException {
+        if (rawJson == null || "null".equals(rawJson)) return null;
+
+        String inner = new JSONObject("{\"v\":" + rawJson + "}").getString("v");
+        return new JSONObject(inner);
+    }
+
+    private static Double unwrapJsDouble(String rawJson, String field) {
+        try {
+            JSONObject json = unwrapJsObject(rawJson);
+            return json != null && json.has(field) ? json.getDouble(field) : null;
+        } catch (JSONException e) {
+            Log.w(TAG, "unwrapJsDouble() failed to parse JS result: " + rawJson, e);
+            return null;
         }
     }
 
