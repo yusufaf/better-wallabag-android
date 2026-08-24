@@ -10,6 +10,8 @@ gen/
 .gradle/
 build/
 local.properties
+*.jks
+*.keystore
 # Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio
 
 *.iml

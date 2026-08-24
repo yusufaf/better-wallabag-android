@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    name: Build, sign, and publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Parse and validate tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)-bw\.([0-9]+)$ ]]; then
+            echo "Tag '$TAG' does not match v<major>.<minor>.<patch>-bw.<n>" >&2
+            exit 1
+          fi
+          MAJOR="${BASH_REMATCH[1]}"
+          MINOR="${BASH_REMATCH[2]}"
+          PATCH="${BASH_REMATCH[3]}"
+          N="${BASH_REMATCH[4]}"
+          VERSION_NAME="${TAG#v}"
+          VERSION_CODE=$(( MAJOR * 1000000 + MINOR * 10000 + PATCH * 100 + N ))
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "versionName=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "versionCode=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+
+      - name: Guard against a lower versionCode than the previous release
+        run: |
+          PREV_TAG=$(git describe --abbrev=0 --tags --match 'v*' "${{ steps.version.outputs.tag }}^" 2>/dev/null || true)
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous v* tag found, skipping monotonicity check."
+            exit 0
+          fi
+          if [[ ! "$PREV_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)-bw\.([0-9]+)$ ]]; then
+            echo "Previous tag '$PREV_TAG' does not match the expected format, skipping monotonicity check." >&2
+            exit 0
+          fi
+          PREV_CODE=$(( ${BASH_REMATCH[1]} * 1000000 + ${BASH_REMATCH[2]} * 10000 + ${BASH_REMATCH[3]} * 100 + ${BASH_REMATCH[4]} ))
+          NEW_CODE="${{ steps.version.outputs.versionCode }}"
+          echo "Previous: $PREV_TAG (versionCode $PREV_CODE) -> New: ${{ steps.version.outputs.tag }} (versionCode $NEW_CODE)"
+          if [ "$NEW_CODE" -le "$PREV_CODE" ]; then
+            echo "versionCode $NEW_CODE is not greater than previous release's $PREV_CODE" >&2
+            exit 1
+          fi
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build unsigned release APK
+        run: |
+          ./gradlew :app:assembleRelease \
+            -PbwVersionName="${{ steps.version.outputs.versionName }}" \
+            -PbwVersionCode="${{ steps.version.outputs.versionCode }}"
+
+      - name: Sign release APK
+        id: sign
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          SIGNING_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)"
+          KEYSTORE="$RUNNER_TEMP/release.jks"
+          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+          ALIGNED="$RUNNER_TEMP/app-release-aligned.apk"
+          OUT_NAME="better-wallabag-${{ steps.version.outputs.versionName }}.apk"
+          OUT="$RUNNER_TEMP/$OUT_NAME"
+
+          echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE"
+
+          "${BUILD_TOOLS}zipalign" -p 4 "$UNSIGNED" "$ALIGNED"
+
+          "${BUILD_TOOLS}apksigner" sign \
+            --ks "$KEYSTORE" \
+            --ks-pass env:SIGNING_KEYSTORE_PASSWORD \
+            --ks-key-alias "$SIGNING_KEY_ALIAS" \
+            --key-pass env:SIGNING_KEY_PASSWORD \
+            --out "$OUT" \
+            "$ALIGNED"
+
+          "${BUILD_TOOLS}apksigner" verify --print-certs "$OUT"
+
+          rm -f "$KEYSTORE"
+
+          sha256sum "$OUT" | awk '{print $1}' > "$OUT.sha256"
+
+          echo "apkPath=$OUT" >> "$GITHUB_OUTPUT"
+          echo "apkName=$OUT_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: ${{ steps.sign.outputs.apkPath }}
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          NOTES_FLAG="--generate-notes"
+          MSG="$(git tag -l --format='%(contents)' "$TAG")"
+          if [ -n "$MSG" ]; then
+            printf '%s\n' "$MSG" > "$RUNNER_TEMP/notes.md"
+            NOTES_FLAG="--notes-file $RUNNER_TEMP/notes.md"
+          fi
+          gh release create "$TAG" \
+            --verify-tag \
+            --title "$TAG" \
+            $NOTES_FLAG \
+            "${{ steps.sign.outputs.apkPath }}#${{ steps.sign.outputs.apkName }}" \
+            "${{ steps.sign.outputs.apkPath }}.sha256#${{ steps.sign.outputs.apkName }}.sha256"
