@@ -4,11 +4,13 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId "fr.gaulupeau.apps.InThePoche"
+        applicationId "fr.gaulupeau.apps.InThePoche.bw"
         minSdkVersion 23
         targetSdkVersion 37
-        versionCode 234
-        versionName "2.6.0"
+
+        def bwVersionCode = project.findProperty('bwVersionCode')
+        versionCode bwVersionCode != null ? bwVersionCode.toInteger() : 234
+        versionName project.findProperty('bwVersionName') ?: "2.6.0"
 
         javaCompileOptions {
             annotationProcessorOptions {
