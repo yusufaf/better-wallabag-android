@@ -23,17 +23,13 @@ jobs:
       - name: Parse and validate tag
         id: version
         run: |
+          source .github/scripts/parse-release-tag.sh
+
           TAG="${GITHUB_REF#refs/tags/}"
-          if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)-bw\.([0-9]+)$ ]]; then
+          if ! parse_tag "$TAG"; then
             echo "Tag '$TAG' does not match v<major>.<minor>.<patch>-bw.<n>" >&2
             exit 1
           fi
-          MAJOR="${BASH_REMATCH[1]}"
-          MINOR="${BASH_REMATCH[2]}"
-          PATCH="${BASH_REMATCH[3]}"
-          N="${BASH_REMATCH[4]}"
-          VERSION_NAME="${TAG#v}"
-          VERSION_CODE=$(( MAJOR * 1000000 + MINOR * 10000 + PATCH * 100 + N ))
 
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "versionName=$VERSION_NAME" >> "$GITHUB_OUTPUT"
@@ -41,16 +37,18 @@ jobs:
 
       - name: Guard against a lower versionCode than the previous release
         run: |
+          source .github/scripts/parse-release-tag.sh
+
           PREV_TAG=$(git describe --abbrev=0 --tags --match 'v*' "${{ steps.version.outputs.tag }}^" 2>/dev/null || true)
           if [ -z "$PREV_TAG" ]; then
             echo "No previous v* tag found, skipping monotonicity check."
             exit 0
           fi
-          if [[ ! "$PREV_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)-bw\.([0-9]+)$ ]]; then
+          if ! parse_tag "$PREV_TAG"; then
             echo "Previous tag '$PREV_TAG' does not match the expected format, skipping monotonicity check." >&2
             exit 0
           fi
-          PREV_CODE=$(( ${BASH_REMATCH[1]} * 1000000 + ${BASH_REMATCH[2]} * 10000 + ${BASH_REMATCH[3]} * 100 + ${BASH_REMATCH[4]} ))
+          PREV_CODE="$VERSION_CODE"
           NEW_CODE="${{ steps.version.outputs.versionCode }}"
           echo "Previous: $PREV_TAG (versionCode $PREV_CODE) -> New: ${{ steps.version.outputs.tag }} (versionCode $NEW_CODE)"
           if [ "$NEW_CODE" -le "$PREV_CODE" ]; then
